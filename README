@@ -1,52 +1,130 @@
-Devel-Rewrite
+NAME
+    Devel::Rewrite - Development preprocessor
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+SYNOPSIS
+        # Your::Module:
 
-A README file is required for CPAN modules since CPAN extracts the README
-file from a module distribution so that people browsing the archive
-can use it to get an idea of the module's uses. It is usually a good idea
-to provide version information here so that people can decide whether
-fixes for the module are worth downloading.
+        # @rewrite s/^#\s+//;
+        # use Some::Development::Module;
 
+        # @rewrite s/some_call/another_call/;
+        $object->some_call;
 
-INSTALLATION
+        sub something {
+        # @include sub.debug.inc
+        ...
+        }
 
-To install this module, run the following commands:
+    And in author tests:
 
-	perl Makefile.PL
-	make
-	make test
-	make install
+        # xt/some-development-test.t:
+        use strict;
+        {
+        use Devel::Rewrite;
+        use Modules::That::Should::Be::Rewrited;
+        }
+        use Modules::Other;
 
-SUPPORT AND DOCUMENTATION
+        # make your tests...
 
-After installing, you can find documentation for this module with the
-perldoc command.
+    Also this module implements pragmatic behaviour.
 
-    perldoc Devel::Rewrite
+        use Devel::Rewrite;
+        use Module1; # rewrite enabled;
+        {
+        no Devel::Rewrite;
+        use Module2; # rewrite disabled;
+        {
+            use Devel::Rewrite;
+            use Module3; # rewrite enabled;
+        }
+        use Module4; # rewrite disabled;
+        }
+        use Module5; # rewrite enabled;
 
-You can also look for information at:
+DESCRIPTION
+    The main purpose of this module is creating optional debugging routines.
 
-    RT, CPAN's request tracker
-        http://rt.cpan.org/NoAuth/Bugs.html?Dist=Devel-Rewrite
+    - which does not require any additional prerequsites for production,
+    like for ex Devel::Leak::Cb
 
-    AnnoCPAN, Annotated CPAN documentation
-        http://annocpan.org/dist/Devel-Rewrite
+    - which does not provide any perfomance overhead in production
+    enveronment.
 
-    CPAN Ratings
-        http://cpanratings.perl.org/d/Devel-Rewrite
+    - which requires no rebuild of target modules for enabling debugging
+    routines
 
-    Search CPAN
-        http://search.cpan.org/dist/Devel-Rewrite/
+    In other words, this module is external source filter, for any loading
+    modules
 
+IMPORTANT NOTICE
+    This module overloads "CORE::GLOBAL::require" on "import". Since this is
+    module loading endpoint, it won't call any previously overloaded
 
-COPYRIGHT AND LICENCE
+    So, if you use something, like as, load this package earlier, than as
 
-Copyright (C) 2010 Mons Anderson
+    Also, please, don't use this module inside your modules. Only in
+    external scripts and applications. That's because there is no way to
+    change the behaviour of "use"'d module inside your sources
 
-This program is free software; you can redistribute it and/or modify it
-under the same terms as Perl itself.
+DIRECTIVES
+    @include filename
+        Include source of "filename" into directive place. Rewrite
+        subprocessing of include will be done. "filename" should be relative
+        to file, which call @include
+
+        # Module.pm:
+        sub yoursub {
+            my @args = @_;
+            # @include debug.inc
+            ...
+        }
+        # debug.inc:
+        warn "Entered sub";
+
+    @rewrite EXPR
+        Call EXPR in context of next non-empty source line
+
+        sub test {
+
+            # @rewrite s/'not\s+/'/;
+
+            return 'not rewritten';
+
+        }
+
+        If next non-empty line is another directive, rewrite is ifnored and
+        warning is emitted
+
+AUTHOR
+    Mons Anderson, "<mons@cpan.org>"
+
+SUPPORT
+    You can look for information at:
+
+    *   RT: CPAN's request tracker
+
+        <http://rt.cpan.org/NoAuth/Bugs.html?Dist=Devel-Rewrite>
+
+    *   AnnoCPAN: Annotated CPAN documentation
+
+        <http://annocpan.org/dist/Devel-Rewrite>
+
+    *   CPAN Ratings
+
+        <http://cpanratings.perl.org/dist/Devel-Rewrite>
+
+    *   Search CPAN
+
+        <http://search.cpan.org/dist/Devel-Rewrite/>
+
+    *   GitHub
+
+        <http://github.com/Mons/Devel-Rewrite>
+
+COPYRIGHT & LICENSE
+    Copyright 2010 Mons Anderson.
+
+    This program is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
 
