@@ -39,20 +39,6 @@ And in author tests:
 
     # make your tests...
 
-Also this module implements pragmatic behaviour.
-
-    use Devel::Rewrite;
-    use Module1; # rewrite enabled;
-    {
-        no Devel::Rewrite;
-        use Module2; # rewrite disabled;
-        {
-            use Devel::Rewrite;
-            use Module3; # rewrite enabled;
-        }
-        use Module4; # rewrite disabled;
-    }
-    use Module5; # rewrite enabled;
 
 =head1 DESCRIPTION
 
@@ -60,7 +46,7 @@ The main purpose of this module is creating optional debugging routines.
 
 - which does not require any additional prerequsites for production, like for ex L<Devel::Leak::Cb>
 
-- which does not provide any perfomance overhead in production enveronment.
+- which does not provide any perfomance overhead in production environment.
 
 - which requires no rebuild of target modules for enabling debugging routines
 
@@ -110,6 +96,44 @@ Call EXPR in context of next non-empty source line
 If next non-empty line is another directive, rewrite is ifnored and warning is emitted
 
 =back
+
+=head1 CONTROLLING
+
+This module implements pragmatic behaviour (so, perl 5.10+).
+Recommented usage way is just enable (by C<use Devel::Rewrite>) in some test script.
+
+    use Devel::Rewrite;
+    use Module1; # rewrite enabled;
+    use Module2; # rewrite enabled;
+    # ...
+
+Another recommended way is enabling rewrite only for a subset of C<use>'d modules
+
+    use Module1; # rewrite disabled;
+    {
+        use Devel::Rewrite;
+        use Module2; # rewrite enabled;
+    }
+    use Module3; # rewrite disabled;
+    # ...
+
+But also may be used complex blocks like:
+
+    use Devel::Rewrite;
+    use Module1; # rewrite enabled;
+    {
+        no Devel::Rewrite;
+        use Module2; # rewrite disabled;
+        {
+            use Devel::Rewrite;
+            use Module3; # rewrite enabled;
+        }
+        use Module4; # rewrite disabled;
+    }
+    use Module5; # rewrite enabled;
+
+Please, note: If some module was C<use>d before enabled rewrite,
+it will not be rewrited anymore in rewrite-enabled scope in later use (see L<perlfunc/require>)
 
 =cut
 
