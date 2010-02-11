@@ -1,5 +1,14 @@
 package Devel::Rewrite;
 
+{
+	# We need this to emulate do $filename behaviour.
+	# See L<perlfunc/do>
+	# Eval should not see lexicals in the enclosing scope
+	sub doeval {
+		return eval($_[1]);
+	}
+}
+{
 use 5.010;
 use strict;
 use warnings;
@@ -10,7 +19,7 @@ Devel::Rewrite - Development preprocessor
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 SYNOPSIS
 
@@ -157,11 +166,11 @@ sub rewrite {
 		open my $f, '<', $realfilename or die "can't open file $realfilename: $!";
 		<$f>;
 	};
+	#return join '',@data; # disable rewrite for debug
 	my $rewritten = 0;
 	my ($rw,$rwline);
 	my $data = "#line 1 $realfilename\n";
 	my $i    = 0; # index in source file
-	my $grow = 0; # grow size for array;
 	
 	while(@data) {
 		$i++;
@@ -177,7 +186,6 @@ sub rewrite {
 					undef $rw;
 				};
 				next;
-				#warn "include $inc + \n@lines";
 			}
 			elsif (s/^\s*#\s*\@rewrite\s+//) {
 				warn "\@rewrite $rw is ignored at $realfilename line $rwline.\n" if defined $rw;
@@ -214,10 +222,6 @@ sub require : method {
 		) {
 			return $old ? goto &$old : CORE::require($_);
 		}
-		#warn "myrequire @_ : active=".in_effect(1)." effective=$effective";
-		#if (( !in_effect(1) and !$effective )) {
-		#	return $old ? goto &$old : CORE::require($_);
-		#}
 		if (exists $INC{$_}) {
 			return 1 if $INC{$_};
 			die "Compilation failed in require";
@@ -229,15 +233,11 @@ sub require : method {
 				my $realfilename = "$prefix/$_";
 				if (-f $realfilename) {
 					$INC{$_} = $realfilename;
-					#$result = do $realfilename;
-					#$result = 
+					#$result = do $realfilename;$result or $@ and die $@;last ITER; # this is how it works natively
 					my $data = $self->rewrite($realfilename);
 					{
 						local $effective = 1;
-						# since we're evaling foreign code, switch off our pragmas
-						no strict;
-						no warnings;
-						$result = eval( "#line 1 $realfilename\n".$data );
+						$result = $self->doeval( "#line 1 $realfilename\n".$data );
 					}
 					$result or $@ and die $@;
 					last ITER;
@@ -330,5 +330,5 @@ This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.
 
 =cut
-
+}
 1; # End of Devel::Rewrite
