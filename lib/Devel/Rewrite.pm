@@ -216,8 +216,8 @@ sub require : method {
 		local $_ = $_[0];
 		if (
 			( !in_effect(1) and !$effective ) or
-			( !/\w/ and sprintf("%vd", $_) =~ /^\d+\.\d+(?:\.\d+|)$/ )
-			or /^\d+\.\d+$/
+			( sprintf("%vd", $_) =~ /^\d+(?:\.\d+(?:\.\d+|)|)$/ )
+			or /^\d+(\.\d+|)/
 			or m{^(strict|warnings|utf8|feature|mro|Devel/Rewrite)\.pm$}
 		) {
 			return $old ? goto &$old : CORE::require($_);

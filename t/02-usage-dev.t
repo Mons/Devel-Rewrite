@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 
 use lib::abs '../lib', 'lib';
-use Test::More tests => 18;
+use Test::More tests => 26;
 use Test::NoWarnings;
 
 use Devel::Rewrite;
@@ -11,6 +11,9 @@ use t::ok::test1;
 	use t::no::test3;
 }
 BEGIN{ eval 'use t::ok::test5'; }
+for (qw( 5 v5 5.000 5.010 5.010000 5.008008 v5.010 5.10.0 )) {
+	ok eval 'use '.$_.'; 1',    'use '.$_ or diag "  $@";
+}
 
 is t::ok::test1::test1(), 'rewritten', 't1.1';
 is t::ok::test1::test2(), 'rewritten', 't1.2';
