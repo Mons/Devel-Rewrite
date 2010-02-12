@@ -5,7 +5,8 @@ package Devel::Rewrite;
 	# See L<perlfunc/do>
 	# Eval should not see lexicals in the enclosing scope
 	sub doeval {
-		return eval($_[1]);
+		defined $_[1] or return;
+		return eval("package $_[2];\n".$_[1]);
 	}
 }
 {
@@ -19,7 +20,7 @@ Devel::Rewrite - Development preprocessor
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 SYNOPSIS
 
@@ -149,46 +150,109 @@ it will not be rewrited anymore in rewrite-enabled scope in later use (see L<per
 our $KEY = '@rewrite';
 our $old;
 our $done;
-our $effective = 0;
+our $recursive = 0;
+
+#=for rem
+use subs 'warn';
+sub warn {
+	my ($f,$l) = (caller)[1,2];
+	local $_ = "@_";
+	s{\n$}{} or $_ .= " at $f line $l.";
+	print STDERR "$_\n";
+	return 1;
+}
+#=cut
 
 sub in_effect {
+	use strict;
 	my $level = shift // 0;
-	my $hinthash = (caller($level))[10];
-	return $hinthash->{$KEY} ? 1 : 0;
+	my @c = caller($level + $recursive);
+	defined $c[0] or return 0;
+	my $hinthash = $c[10];
+	#my $v = $hinthash->{$KEY};
+	no warnings;
+	#print STDERR "$KEY at $level not defined @c[1,2]\n" unless defined $hinthash->{$KEY};
+	return
+		defined $hinthash->{$KEY} ? 
+			$hinthash->{$KEY}
+			: do { local $recursive = $recursive + 1; in_effect($level+1) }
 }
 
 sub rewrite {
 	use strict;
 	my $self = shift;
-	my $realfilename = shift;
-	( my $base = $realfilename ) =~ s{[^/]+$}{};
-	my @data = do {
-		open my $f, '<', $realfilename or die "can't open file $realfilename: $!";
-		<$f>;
-	};
+	my ($indata,$file,$realfile) = @_;
+	my $base;
+	if (!$indata) {
+		die "Need either indata or realfile" unless $realfile;
+		open my $f, '<:raw', $realfile or die "can't open file $realfile: $!";
+		$indata = do { local $/; <$f> };
+		close $f;
+	} else {
+		#unless ($realfile and !ref $INC{$file}) {
+		if (!$realfile and !ref $INC{$file}) {
+			warn "No realfile, use inc $INC{$file}";
+			$realfile = $INC{$file};
+		}
+	}
+	if ($indata =~ s{^\xEF\xBB\xBF}{} ) {
+		# utf8;
+	}
+	elsif ($indata =~ s{\xFF\xFE}{} ) {
+		# utf16 LE
+		$indata = pack 'C*', unpack 'v*', $indata;
+	}
+	elsif ( $indata =~ s{\xFE\xFF}{} ) {
+		# utf16 BE
+		$indata = pack 'C*', unpack 'n*', $indata;
+	}
+	if (ref $INC{$file}) {
+		# Can't define base for dynamycally loaded files;
+	}
+	elsif ($INC{$file}) {
+		( $base = $INC{$file} ) =~ s{[^/]+$}{};
+	}
+	elsif ( $realfile ) {
+		( $base = $realfile ) =~ s{[^/]+$}{};
+	}
+	else {
+		warn "No either \$INC or \$realfile entry for $file";
+	}
+	#( $base = $realfile ) =~ s{[^/]+$}{};
+	
+	#my @data = $indata =~ m{^(.+)$}mg;
+	my @data = split /\015?\012/,$indata;
 	#return join '',@data; # disable rewrite for debug
 	my $rewritten = 0;
 	my ($rw,$rwline);
-	my $data = "#line 1 $realfilename\n";
+	my $data;
+	$data .= "#line 1 $realfile\n" if $realfile;
 	my $i    = 0; # index in source file
 	
 	while(@data) {
 		$i++;
-		for( shift @data ) {
+		for( shift(@data)."\n" ) {
+			#print STDERR "# line $i | $_";
 			if (s/^\s*#\s*\@include\s+//) {
+				unless ($base) {
+					CORE::warn("Can't use \@include inside dynamycally loaded files without %INC entry at $realfile line $i.\n");
+					$data .= "# include: Can't use \@include inside dynamycally loaded files without %INC entry\n";
+					next;
+				}
 				s{\s*$}{};
 				my $inc = $base . $_;
-				my $idata = $self->rewrite($inc);
+				my ($idata) = $self->rewrite(undef, $_, $inc);
 				$idata .= "\n" unless $idata =~ /\n$/s;
-				$data .= "# included: $inc\n" . $idata . "#line ".($i+1)." $realfilename\n";
+				$data .= "# included: $inc\n" . $idata . "#line ".($i+1)." $realfile\n";
 				if ( defined $rw ) {
-					warn "\@rewrite $rw is ignored at $realfilename line $rwline.\n";
+					warn "\@rewrite $rw is ignored at $realfile line $rwline.\n";
 					undef $rw;
 				};
+				$rewritten = 1;
 				next;
 			}
 			elsif (s/^\s*#\s*\@rewrite\s+//) {
-				warn "\@rewrite $rw is ignored at $realfilename line $rwline.\n" if defined $rw;
+				warn "\@rewrite $rw is ignored at $realfile line $rwline.\n" if defined $rw;
 				$rw = $_;chomp($rw);
 				$rwline = $i;
 				$data .= "\n";
@@ -198,7 +262,7 @@ sub rewrite {
 				#warn "rewriting $realfilename line $i using $rw defined on line $rwline";
 				{
 					$@ = undef;
-					eval("#line $rwline $realfilename\n".$rw);
+					eval("#line $rwline $realfile\n".$rw);
 					die "\@rewrite error: $@" if $@;
 				}
 				$rewritten = 1;
@@ -207,50 +271,157 @@ sub rewrite {
 			$data .= $_;
 		}
 	}
-	#warn "evaling:\n$data" if $rewritten;
-	return $data;
+	#print STDERR "evaling:\n$data" if $rewritten;
+	return $data, $rewritten;
+}
+
+sub load_ref {
+	my $self = shift;
+	my ($cpkg,$cfile,$cline) = (caller 2)[0..2];
+	@_ or warn("No args"),return; #
+	defined $_[0] or warn("No fh"),return;
+	my ($fh,$sub,$st);
+	if (ref $_[0] eq 'CODE') {
+		my ($gen,@arg) = @_;
+		#warn "# Generator @_";
+		my $out = '';
+		{
+			local $_;
+			while ($gen->($gen,@arg)) {
+				$out .= $_;
+			}
+		}
+		return $out;
+	} elsif ( ref $_[0] eq 'GLOB' ) {
+		my $fh = shift;
+		# seek $fh,0,0 or die "Cant seek $fh: $!";
+		if (ref $_[0] eq 'CODE') {
+			my ($filter,@arg) = @_;
+			#warn "# Source filter @_";
+			my $out = '';
+			{
+				local $/ = "\012";
+				my $last = 0;
+				while () {
+					local $_ = <$fh>;
+					$last=1,$_ = '' unless defined;
+					#warn "line = <$_>";
+					my $rc = $filter->($filter,@arg);
+					$out .= $_;
+					#$rc or last;
+					$last and last;
+				}
+			}
+			return $out;
+		}
+		else {
+			#warn "# Simple fh";
+			return scalar do { local $/; <$fh> };
+		}
+	} else {
+		warn "Wrong INC code $_[0], dunno what to do at $cfile line $cline.\n";
+	}
+	return;
 }
 
 sub require : method {
 	my $self = shift;
 		local $_ = $_[0];
+		my ($cpkg,$cfile,$cline) = (caller 0)[0..2];
+		defined and length or die "Null filename used at $cfile line $cline.\n";
+		print STDERR "# @_ ". in_effect(1) . "\n" if $ENV{RUSES};
 		if (
-			( !in_effect(1) and !$effective ) or
-			( sprintf("%vd", $_) =~ /^\d+(?:\.\d+(?:\.\d+|)|)$/ )
+			( !in_effect(1) ) or
+			/[\x00-\x09]+/
+			#( sprintf("%vd", $_) =~ /^\d+(?:\.\d+(?:\.\d+|)|)$/ )
 			or /^\d+(\.\d+|)/
-			or m{^(strict|warnings|utf8|feature|mro|Devel/Rewrite)\.pm$}
+			or m{^(strict|warnings.*|utf8|feature|mro|Carp.*|Devel/Rewrite)\.pm$}
 		) {
 			return $old ? goto &$old : CORE::require($_);
 		}
+		#if ($INC{$_}) {
 		if (exists $INC{$_}) {
 			return 1 if $INC{$_};
 			die "Compilation failed in require";
 		}
-		my ($cfile,$cline) = (caller)[1,2];
 		my $result;
+		my ($data,$rwok,$refinc);
 		ITER: {
-			for my $prefix (@INC) {
-				my $realfilename = "$prefix/$_";
-				if (-f $realfilename) {
-					$INC{$_} = $realfilename;
-					#$result = do $realfilename;$result or $@ and die $@;last ITER; # this is how it works natively
-					my $data = $self->rewrite($realfilename);
+			for my $inc (@INC) {
+				if (my $ref = ref $inc) {
+					#warn "require ref $ref";
+					my @rv = ();
 					{
-						local $effective = 1;
-						$result = $self->doeval( "#line 1 $realfilename\n".$data );
+						local $_ = $_;
+						if ($ref eq 'CODE') {
+							warn "Call $inc" if $ENV{RUSES};
+							@rv = $inc->($inc,$_);
+						}
+						elsif ($ref eq 'ARRAY' and ref $inc->[0] eq 'CODE' ) {
+							warn "Call $inc [ @$inc ]" if $ENV{RUSES};
+							@rv = $inc->[0]($inc, $_);
+							warn "Call $inc [ @$inc ]" if $ENV{RUSES};
+						}
+						elsif (UNIVERSAL::can($inc, 'isa')) {
+							warn "Call $inc" if $ENV{RUSES};
+							@rv = $inc->INC($_);
+						}
+						else {
+							warn "Bad inc entry $inc";
+							next ITER;
+						}
+						@rv or next ITER;# warn("No args 1"),next ITER;
+						defined $rv[0] or next ITER;# warn("No fh 1"),next ITER;
 					}
-					$result or $@ and die $@;
+					$INC{$_} = $inc unless exists $INC{$_};
+					warn "[@rv] \$INC{$_} = $INC{$_}" if $ENV{RUSES};
+					my $indata = $self->load_ref(@rv) or next;
+					my $origin;
+					if (ref $INC{$_}) {
+						(my $refaddr) = "$inc" =~ /\((0x[\da-f]+)\)/;
+						$origin = "/loader/$refaddr/$_";
+					} else {
+						$origin = $INC{$_};
+					}
+					warn "Set origin for $_ to $INC{$_}" if $ENV{RUSES};
+					($data,$rwok) = $self->rewrite($indata,$_,$origin);
+					#warn "Rewritten($rwok): $data";
 					last ITER;
+				} else {
+					my $realfilename = "$inc/$_";
+					if (-f $realfilename.'c') {
+						$realfilename .= 'c'; # .pmc
+					}
+					if (-f $realfilename) {
+						$INC{$_} = $realfilename;
+						#$result = do $realfilename;$result or $@ and die $@;last ITER; # this is how it works natively
+						($data,$rwok) = $self->rewrite(undef,$_,$realfilename);
+						last ITER;
+					}
 				}
 			}
-			die "Can't locate $_ in \@INC (\@INC contains: @INC). at $cfile line $cline.\n";
+			die "!Can't locate $_ in \@INC (\@INC contains: @INC). at $cfile line $cline.\n";
+		}
+		{
+			{
+				use Data::Dumper;
+				warn "Evaling ".Dumper($data)."\n\t" if $ENV{RSRC};
+				$result = $self->doeval( $data, $cpkg );
+				if ($@ and $ENV{RSRC}) {
+					warn "eval $_ failed: $@" if $@;
+				}
+			}
+			#$result or $@ and warn("Dying with $@ for $_"),die $@;
+			if ($refinc) {
+				#$INC{$_} = $refinc;
+			}
 		}
 		if ($@) {
 			$INC{$_} = undef;
 			die $@;
 		} elsif (!$result) {
 			delete $INC{$_};
-			die "$_ did not return true value at $cfile line $cline.\n";
+			die "$_ did not return a true value at $cfile line $cline.\n";
 		} else {
 			return $result;
 		}
