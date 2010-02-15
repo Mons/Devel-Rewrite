@@ -20,7 +20,7 @@ Devel::Rewrite - Development preprocessor
 
 =cut
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 =head1 SYNOPSIS
 
@@ -347,7 +347,7 @@ sub require : method {
 		my $result;
 		my ($data,$rwok,$refinc);
 		ITER: {
-			for my $inc (@INC) {
+			for my $inc ('',@INC) {
 				if (my $ref = ref $inc) {
 					#warn "require ref $ref";
 					my @rv = ();

@@ -1,5 +1,6 @@
 #!./perl
 
+no warnings 'redefine';
 use lib::abs '../lib', '.';
 use Devel::Rewrite;
 BEGIN {
